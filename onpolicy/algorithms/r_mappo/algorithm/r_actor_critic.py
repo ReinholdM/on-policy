@@ -28,7 +28,10 @@ class R_Actor(nn.Module):
         self._recurrent_N = args.recurrent_N
         self.tpdv = dict(dtype=torch.float32, device=device)
 
-        obs_shape = get_shape_from_obs_space(obs_space)
+        if args.env_name == 'GRFootball':
+            obs_shape = [args.state_shape]
+        else:
+            obs_shape = get_shape_from_obs_space(obs_space)
         base = CNNBase if len(obs_shape) == 3 else MLPBase
         self.base = base(args, obs_shape)
 
@@ -124,7 +127,10 @@ class R_Critic(nn.Module):
         self.tpdv = dict(dtype=torch.float32, device=device)
         init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][self._use_orthogonal]
 
-        cent_obs_space = get_shape_from_obs_space(cent_obs_space)
+        if args.env_name == 'GRFootball':
+            cent_obs_space = [args.state_shape]
+        else:
+            cent_obs_space = get_shape_from_obs_space(cent_obs_space)
         base = CNNBase if len(cent_obs_space) == 3 else MLPBase
         self.base = base(args, cent_obs_space)
 
@@ -158,3 +164,79 @@ class R_Critic(nn.Module):
         values = self.v_out(critic_features)
 
         return values, rnn_states
+
+class R_Q_Head(nn.Module):
+    """
+    Q network class for MAPPO. Outputs state-action-value function predictions given centralized input (MAPPO) or
+                                local observations (IPPO).
+    :param args: (argparse.Namespace) arguments containing relevant model information.
+    :param cent_obs_space: (gym.Space) (centralized) observation space.
+    :param action_space: (gym.Space) action space.
+    :param device: (torch.device) specifies the device to run on (cpu/gpu).
+    """
+    def __init__(self, args, cent_obs_space, action_space, device=torch.device("cpu")):
+        super(R_Q_Head, self).__init__()
+        self.hidden_size = args.hidden_size
+        self._gain = args.gain
+        self._use_orthogonal = args.use_orthogonal
+        self._use_naive_recurrent_policy = args.use_naive_recurrent_policy
+        self._use_recurrent_policy = args.use_recurrent_policy
+        self._recurrent_N = args.recurrent_N
+        self.tpdv = dict(dtype=torch.float32, device=device)
+        init_method = [nn.init.xavier_uniform_, nn.init.orthogonal_][self._use_orthogonal]
+
+        if args.env_name == 'GRFootball':
+            cent_obs_space = [args.state_shape]
+        else:
+            cent_obs_space = get_shape_from_obs_space(cent_obs_space)
+        base = CNNBase if len(cent_obs_space) == 3 else MLPBase
+        self.base = base(args, cent_obs_space)
+
+        if self._use_naive_recurrent_policy or self._use_recurrent_policy:
+            self.rnn = RNNLayer(self.hidden_size, self.hidden_size, self._recurrent_N, self._use_orthogonal)
+
+        def init_(m):
+            return init(m, init_method, lambda x: nn.init.constant_(x, 0))
+
+        self.v_out = init_(nn.Linear(self.hidden_size, self.hidden_size))
+
+        # self.act = ACTLayer(action_space, self.hidden_size, self._use_orthogonal, self._gain)
+        if action_space.__class__.__name__ == "Discrete":
+            action_dim = action_space.n
+            self.action_out = nn.Linear(self.hidden_size, action_dim)
+        elif action_space.__class__.__name__ == "Box":
+            action_dim = action_space.shape[0]
+            self.action_out = nn.Linear(self.hidden_size, action_dim)
+        elif action_space.__class__.__name__ == "MultiBinary":
+            action_dim = action_space.shape[0]
+            self.action_out = nn.Linear(self.hidden_size, action_dim)
+        elif action_space.__class__.__name__ == "MultiDiscrete":
+            self.multi_discrete = True
+            action_dims = action_space.high - action_space.low + 1
+            self.action_outs = []
+            for action_dim in action_dims:
+                self.action_outs.append(nn.Linear(self.hidden_size, action_dim))
+            self.action_outs = nn.ModuleList(self.action_outs)
+        self.to(device)
+
+    def forward(self, cent_obs, rnn_states, masks):
+        """
+        Compute actions from the given inputs.
+        :param cent_obs: (np.ndarray / torch.Tensor) observation inputs into network.
+        :param rnn_states: (np.ndarray / torch.Tensor) if RNN network, hidden states for RNN.
+        :param masks: (np.ndarray / torch.Tensor) mask tensor denoting if RNN states should be reinitialized to zeros.
+
+        :return values: (torch.Tensor) value function predictions.
+        :return rnn_states: (torch.Tensor) updated RNN hidden states.
+        """
+        cent_obs = check(cent_obs).to(**self.tpdv)
+        rnn_states = check(rnn_states).to(**self.tpdv)
+        masks = check(masks).to(**self.tpdv)
+
+        critic_features = self.base(cent_obs)
+        if self._use_naive_recurrent_policy or self._use_recurrent_policy:
+            critic_features, rnn_states = self.rnn(critic_features, rnn_states, masks)
+        values = self.v_out(critic_features)
+
+        q_values = self.action_out(values)
+        return q_values, rnn_states

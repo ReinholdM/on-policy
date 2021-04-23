@@ -3,9 +3,9 @@ env="MPE"
 scenario="simple_spread"  # simple_speaker_listener # simple_spread
 num_landmarks=3
 num_agents=3
-algo="rmappo"
+algo="mappo"
 exp="rnn_mini4"
-seed_max=1
+seed_max=5
 
 echo "env is ${env}, scenario is ${scenario}, algo is ${algo}, exp is ${exp}, max seed is ${seed_max}"
 for seed in `seq ${seed_max}`;

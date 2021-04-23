@@ -1,7 +1,7 @@
 #!/bin/sh
 env="StarCraft2"
 map="corridor"
-algo="mappo"
+algo="rmappo"
 exp="mlp"
 seed_max=1
 

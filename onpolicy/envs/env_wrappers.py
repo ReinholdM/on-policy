@@ -169,7 +169,8 @@ def worker(remote, parent_remote, env_fn_wrapper):
             remote.close()
             break
         elif cmd == 'get_spaces':
-            remote.send((env.observation_space, env.share_observation_space, env.action_space))
+            remote.send((env.observation(), env.observation(), env.action_space))
+            # remote.send((env.observation_space, env.share_observation_space, env.action_space))
         else:
             raise NotImplementedError
 
@@ -662,8 +663,10 @@ class DummyVecEnv(ShareVecEnv):
     def __init__(self, env_fns):
         self.envs = [fn() for fn in env_fns]
         env = self.envs[0]
+        # ShareVecEnv.__init__(self, len(
+        #     env_fns), env.observation_space, env.share_observation_space, env.action_space)
         ShareVecEnv.__init__(self, len(
-            env_fns), env.observation_space, env.share_observation_space, env.action_space)
+            env_fns), env.observation(), env.observation(), env.action_space)
         self.actions = None
 
     def step_async(self, actions):

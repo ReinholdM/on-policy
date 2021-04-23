@@ -79,8 +79,12 @@ class ACTLayer(nn.Module):
             action_logits = self.action_out(x, available_actions)
             actions = action_logits.mode() if deterministic else action_logits.sample() 
             action_log_probs = action_logits.log_probs(actions)
-        
+            # pi = torch.softmax(action_logits.logits, dim=-1)
+
         return actions, action_log_probs
+
+    def transfer(self, actions):
+        pass
 
     def get_probs(self, x, available_actions=None):
         """

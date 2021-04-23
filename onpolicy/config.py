@@ -173,13 +173,20 @@ def get_config():
                         help="Number of parallel envs for rendering rollouts")
     parser.add_argument("--num_env_steps", type=int, default=10e6,
                         help='Number of environment steps to train (default: 10e6)')
-    parser.add_argument("--user_name", type=str, default='marl',help="[for wandb usage], to specify user's name for simply collecting training data.")
-    parser.add_argument("--use_wandb", action='store_false', default=True, help="[for wandb usage], by default True, will log date to wandb server. or else will use tensorboard to log data.")
+    parser.add_argument("--user_name", type=str, default='reinholdm',help="[for wandb usage], to specify user's name for simply collecting training data.")
+    parser.add_argument("--use_wandb", action='store_true', default=True, help="[for wandb usage], by default True, will log date to wandb server. or else will use tensorboard to log data.")
 
     # env parameters
-    parser.add_argument("--env_name", type=str, default='StarCraft2', help="specify the name of environment")
+    parser.add_argument("--env_name", type=str, default='GRFootball', help="specify the name of environment")
     parser.add_argument("--use_obs_instead_of_state", action='store_true',
                         default=False, help="Whether to use global state or concatenated obs")
+    parser.add_argument("--state_shape", type=int, default=115,
+                        help="input shape for Google Football")
+    parser.add_argument("--n_agents", type=int, default=3,
+                        help="number of agent for Google Football")
+    parser.add_argument("--encoder", type=str, default='encoder_basic', help="specify the feature encoder")
+    parser.add_argument("--rewarder", type=str, default='rewarder_basic', help="specify the reward encoder")
+
 
     # replay buffer parameters
     parser.add_argument("--episode_length", type=int,
@@ -235,6 +242,9 @@ def get_config():
                         help='ppo clip parameter (default: 0.2)')
     parser.add_argument("--num_mini_batch", type=int, default=1,
                         help='number of batches for ppo (default: 1)')
+    parser.add_argument("--n_actions", type=int, default=19,
+                        help='size of action_space for football (default: 19)')
+
     parser.add_argument("--entropy_coef", type=float, default=0.01,
                         help='entropy term coefficient (default: 0.01)')
     parser.add_argument("--value_loss_coef", type=float,
@@ -280,5 +290,6 @@ def get_config():
 
     # pretrained parameters
     parser.add_argument("--model_dir", type=str, default=None, help="by default None. set the path to pretrained model.")
+
 
     return parser

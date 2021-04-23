@@ -28,14 +28,22 @@ class SMACRunner(Runner):
 
             for step in range(self.episode_length):
                 # Sample actions
-                values, actions, action_log_probs, rnn_states, rnn_states_critic = self.collect(step)
+                if self.all_args.use_q_head:
+                    q_values, values, actions, action_log_probs, rnn_states, rnn_states_critic, pi = self.collect(step)
+                else:
+                    values, actions, action_log_probs, rnn_states, rnn_states_critic = self.collect(step)
                     
                 # Obser reward and next obs
                 obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions)
 
-                data = obs, share_obs, rewards, dones, infos, available_actions, \
-                       values, actions, action_log_probs, \
-                       rnn_states, rnn_states_critic 
+                if self.all_args.use_q_head:
+                    data = obs, share_obs, rewards, dones, infos, available_actions, \
+                           q_values, values, actions, action_log_probs, \
+                           rnn_states, rnn_states_critic, pi
+                else:
+                    data = obs, share_obs, rewards, dones, infos, available_actions, \
+                           values, actions, action_log_probs, \
+                           rnn_states, rnn_states_critic
                 
                 # insert data into buffer
                 self.insert(data)
@@ -110,13 +118,25 @@ class SMACRunner(Runner):
     @torch.no_grad()
     def collect(self, step):
         self.trainer.prep_rollout()
-        value, action, action_log_prob, rnn_state, rnn_state_critic \
-            = self.trainer.policy.get_actions(np.concatenate(self.buffer.share_obs[step]),
-                                            np.concatenate(self.buffer.obs[step]),
-                                            np.concatenate(self.buffer.rnn_states[step]),
-                                            np.concatenate(self.buffer.rnn_states_critic[step]),
-                                            np.concatenate(self.buffer.masks[step]),
-                                            np.concatenate(self.buffer.available_actions[step]))
+        if self.all_args.use_q_head:
+            q_values, value, action, action_log_prob, rnn_state, rnn_state_critic, pi \
+                = self.trainer.policy.get_actions(np.concatenate(self.buffer.share_obs[step]),
+                                              np.concatenate(self.buffer.obs[step]),
+                                              np.concatenate(self.buffer.rnn_states[step]),
+                                              np.concatenate(self.buffer.rnn_states_critic[step]),
+                                              np.concatenate(self.buffer.masks[step]),
+                                              np.concatenate(self.buffer.available_actions[step]))
+            q_values = np.array(np.split(_t2n(q_values), self.n_rollout_threads))
+            pi = np.array(np.split(_t2n(pi), self.n_rollout_threads))
+
+        else:
+            value, action, action_log_prob, rnn_state, rnn_state_critic \
+                = self.trainer.policy.get_actions(np.concatenate(self.buffer.share_obs[step]),
+                                                np.concatenate(self.buffer.obs[step]),
+                                                np.concatenate(self.buffer.rnn_states[step]),
+                                                np.concatenate(self.buffer.rnn_states_critic[step]),
+                                                np.concatenate(self.buffer.masks[step]),
+                                                np.concatenate(self.buffer.available_actions[step]))
         # [self.envs, agents, dim]
         values = np.array(np.split(_t2n(value), self.n_rollout_threads))
         actions = np.array(np.split(_t2n(action), self.n_rollout_threads))
@@ -124,11 +144,18 @@ class SMACRunner(Runner):
         rnn_states = np.array(np.split(_t2n(rnn_state), self.n_rollout_threads))
         rnn_states_critic = np.array(np.split(_t2n(rnn_state_critic), self.n_rollout_threads))
 
-        return values, actions, action_log_probs, rnn_states, rnn_states_critic
+        if self.all_args.use_q_head:
+            return q_values, values, actions, action_log_probs, rnn_states, rnn_states_critic, pi
+        else:
+            return values, actions, action_log_probs, rnn_states, rnn_states_critic
 
     def insert(self, data):
-        obs, share_obs, rewards, dones, infos, available_actions, \
-        values, actions, action_log_probs, rnn_states, rnn_states_critic = data
+        if self.all_args.use_q_head:
+            obs, share_obs, rewards, dones, infos, available_actions, \
+            q_values, values, actions, action_log_probs, rnn_states, rnn_states_critic, pi = data
+        else:
+            obs, share_obs, rewards, dones, infos, available_actions, \
+            values, actions, action_log_probs, rnn_states, rnn_states_critic = data
 
         dones_env = np.all(dones, axis=1)
 
@@ -147,8 +174,13 @@ class SMACRunner(Runner):
         if not self.use_centralized_V:
             share_obs = obs
 
-        self.buffer.insert(share_obs, obs, rnn_states, rnn_states_critic,
-                           actions, action_log_probs, values, rewards, masks, bad_masks, active_masks, available_actions)
+        if self.all_args.use_q_head:
+            self.buffer.insert(share_obs, obs, rnn_states, rnn_states_critic,
+                               actions, action_log_probs, q_values, values, pi, rewards, masks, bad_masks, active_masks,
+                               available_actions)
+        else:
+            self.buffer.insert(share_obs, obs, rnn_states, rnn_states_critic,
+                               actions, action_log_probs, None, values, rewards, masks, bad_masks, active_masks, available_actions)
 
     def log_train(self, train_infos, total_num_steps):
         train_infos["average_step_rewards"] = np.mean(self.buffer.rewards)

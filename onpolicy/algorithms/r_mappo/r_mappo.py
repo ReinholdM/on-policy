@@ -5,6 +5,7 @@ from onpolicy.utils.util import get_gard_norm, huber_loss, mse_loss
 from onpolicy.utils.popart import PopArt
 from onpolicy.algorithms.utils.util import check
 
+
 class R_MAPPO():
     """
     Trainer class for MAPPO to update policies.
@@ -12,11 +13,13 @@ class R_MAPPO():
     :param policy: (R_MAPPO_Policy) policy to update.
     :param device: (torch.device) specifies the device to run on (cpu/gpu).
     """
+
     def __init__(self,
                  args,
                  policy,
                  device=torch.device("cpu")):
 
+        self.args = args
         self.device = device
         self.tpdv = dict(dtype=torch.float32, device=device)
         self.policy = policy
@@ -27,7 +30,7 @@ class R_MAPPO():
         self.data_chunk_length = args.data_chunk_length
         self.value_loss_coef = args.value_loss_coef
         self.entropy_coef = args.entropy_coef
-        self.max_grad_norm = args.max_grad_norm       
+        self.max_grad_norm = args.max_grad_norm
         self.huber_delta = args.huber_delta
 
         self._use_recurrent_policy = args.use_recurrent_policy
@@ -38,7 +41,7 @@ class R_MAPPO():
         self._use_popart = args.use_popart
         self._use_value_active_masks = args.use_value_active_masks
         self._use_policy_active_masks = args.use_policy_active_masks
-        
+
         if self._use_popart:
             self.value_normalizer = PopArt(1, device=self.device)
         else:
@@ -101,19 +104,23 @@ class R_MAPPO():
         value_preds_batch, return_batch, masks_batch, active_masks_batch, old_action_log_probs_batch, \
         adv_targ, available_actions_batch = sample
 
+        if self.args.env_name == 'GRFootball':
+            old_action_log_probs_batch = old_action_log_probs_batch[:, 0].reshape([-1, 1])
         old_action_log_probs_batch = check(old_action_log_probs_batch).to(**self.tpdv)
         adv_targ = check(adv_targ).to(**self.tpdv)
         value_preds_batch = check(value_preds_batch).to(**self.tpdv)
         return_batch = check(return_batch).to(**self.tpdv)
         active_masks_batch = check(active_masks_batch).to(**self.tpdv)
 
+        if self.args.env_name == 'GRFootball':
+            actions_batch = actions_batch[:, 0]
         # Reshape to do in a single forward pass for all steps
         values, action_log_probs, dist_entropy = self.policy.evaluate_actions(share_obs_batch,
-                                                                              obs_batch, 
-                                                                              rnn_states_batch, 
-                                                                              rnn_states_critic_batch, 
-                                                                              actions_batch, 
-                                                                              masks_batch, 
+                                                                              obs_batch,
+                                                                              rnn_states_batch,
+                                                                              rnn_states_critic_batch,
+                                                                              actions_batch,
+                                                                              masks_batch,
                                                                               available_actions_batch,
                                                                               active_masks_batch)
         # actor update
@@ -159,6 +166,19 @@ class R_MAPPO():
 
         return value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights
 
+    def piob_corrected(self, q, pi):
+        """
+        Calculating the optimal baseline
+        :param q: Q values of all actions under the same states
+        :param pi: Probability distributions of actions
+        :return: The optimal baseline
+        """
+        M = torch.norm(pi) ** 2 + 1
+        xweight = M - 2 * pi
+        enum = (pi * xweight * q).sum(-1)
+        deno = (pi * xweight).sum(-1)
+        return (enum / deno).detach()
+
     def train(self, buffer, update_actor=True):
         """
         Perform a training update using minibatch GD.
@@ -176,7 +196,6 @@ class R_MAPPO():
         mean_advantages = np.nanmean(advantages_copy)
         std_advantages = np.nanstd(advantages_copy)
         advantages = (advantages - mean_advantages) / (std_advantages + 1e-5)
-        
 
         train_info = {}
 
@@ -196,7 +215,6 @@ class R_MAPPO():
                 data_generator = buffer.feed_forward_generator(advantages, self.num_mini_batch)
 
             for sample in data_generator:
-
                 value_loss, critic_grad_norm, policy_loss, dist_entropy, actor_grad_norm, imp_weights \
                     = self.ppo_update(sample, update_actor)
 
@@ -211,7 +229,7 @@ class R_MAPPO():
 
         for k in train_info.keys():
             train_info[k] /= num_updates
- 
+
         return train_info
 
     def prep_training(self):

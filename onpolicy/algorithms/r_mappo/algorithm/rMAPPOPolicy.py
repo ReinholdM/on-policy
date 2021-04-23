@@ -1,6 +1,8 @@
 import torch
-from onpolicy.algorithms.r_mappo.algorithm.r_actor_critic import R_Actor, R_Critic
+from onpolicy.algorithms.r_mappo.algorithm.r_actor_critic import R_Actor, R_Critic, R_Q_Head
 from onpolicy.utils.util import update_linear_schedule
+
+from gym import spaces
 
 
 class R_MAPPOPolicy:
@@ -15,6 +17,7 @@ class R_MAPPOPolicy:
     """
 
     def __init__(self, args, obs_space, cent_obs_space, act_space, device=torch.device("cpu")):
+        self.args = args
         self.device = device
         self.lr = args.lr
         self.critic_lr = args.critic_lr
@@ -23,7 +26,11 @@ class R_MAPPOPolicy:
 
         self.obs_space = obs_space
         self.share_obs_space = cent_obs_space
-        self.act_space = act_space
+
+        if args.env_name == 'GRFootball':
+            self.act_space = spaces.Discrete(act_space)
+        else:
+            self.act_space = act_space
 
         self.actor = R_Actor(args, self.obs_space, self.act_space, self.device)
         self.critic = R_Critic(args, self.share_obs_space, self.device)
@@ -32,9 +39,9 @@ class R_MAPPOPolicy:
                                                 lr=self.lr, eps=self.opti_eps,
                                                 weight_decay=self.weight_decay)
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
-                                                 lr=self.critic_lr,
-                                                 eps=self.opti_eps,
-                                                 weight_decay=self.weight_decay)
+                                                     lr=self.critic_lr,
+                                                     eps=self.opti_eps,
+                                                     weight_decay=self.weight_decay)
 
     def lr_decay(self, episode, episodes):
         """
@@ -65,11 +72,10 @@ class R_MAPPOPolicy:
         :return rnn_states_critic: (torch.Tensor) updated critic network RNN states.
         """
         actions, action_log_probs, rnn_states_actor = self.actor(obs,
-                                                                 rnn_states_actor,
-                                                                 masks,
-                                                                 available_actions,
-                                                                 deterministic)
-
+                                                                     rnn_states_actor,
+                                                                     masks,
+                                                                     available_actions,
+                                                                     deterministic)
         values, rnn_states_critic = self.critic(cent_obs, rnn_states_critic, masks)
         return values, actions, action_log_probs, rnn_states_actor, rnn_states_critic
 
@@ -109,7 +115,6 @@ class R_MAPPOPolicy:
                                                                      masks,
                                                                      available_actions,
                                                                      active_masks)
-
         values, _ = self.critic(cent_obs, rnn_states_critic, masks)
         return values, action_log_probs, dist_entropy
 
